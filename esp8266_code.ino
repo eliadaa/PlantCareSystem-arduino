@@ -23,26 +23,29 @@ void loop() {
   if(Serial.available()>0){
     String data = Serial.readStringUntil('\n');
     Serial.println(data);
-    int comma = data.indexOf(',');
+    int firstComma = data.indexOf(',');
+    int secondComma = data.indexOf(',', firstComma + 1);
 
 
     // write a code_number for each sensor info, so you can diff them 
-    if(comma != -1){
-      float t = data.substring(0, comma).toFloat();
-      float h = data.substring(comma+1).toFloat();
+    if(firstComma != -1 && secondComma != -1){
+      float t = data.substring(0, firstComma).toFloat();
+      float h = data.substring(firstComma+1, secondComma).toFloat();
+      float l = data.substring(secondComma+1).toFloat();
       Serial.print(t);
-      Serial.println(h);
+      Serial.print(h);
+      Serial.println(l);
       Serial.println();
-      sendData(t,h);
+      sendData(t,h,l);
     }
   }
 }
 
-void sendData(float t, float h){
+void sendData(float t, float h, float l){
   WiFiClient client;
   HTTPClient http;
 
-  String newUrl=URL+String(t)+"&field2="+String(h);
+  String newUrl=URL+String(t)+"&field2="+String(h)+"&field3="+String(l);
   http.begin(client,newUrl);
   int responsecode=http.GET();
   String data=http.getString();
