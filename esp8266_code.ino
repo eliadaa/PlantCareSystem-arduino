@@ -1,67 +1,167 @@
 #include<ESP8266WiFi.h>
 #include<WiFiClient.h>
 #include<ESP8266HTTPClient.h>
-String URL="http://api.thingspeak.com/update?api_key=VVSDJEX2MALIAU1D&field1=";
+#include <ThingSpeak.h>
+
+
+// sensor codes and fields for reading data from ThingSpeak
+#define TEMPERATURE_CODE       501
+#define HUMIDITY_CODE          502
+#define LUMINOSITY_CODE        503
+#define MOISTURE_CODE          504
+#define WATERLEVEL_CODE        505
+
+#define temp_field             1
+#define humid_field            2
+#define lumi_field             3
+#define moisture_field         4
+#define water_level_field      5
+
+// ThingSpeak settings for reading the sensor data 
+const unsigned long channelID = 2175282;  // ThingSpeak Channel ID
+const char* writeAPIKey = "VVSDJEX2MALIAU1D";  // Write API Key
+
+
+// network alternatives 
+const char* primary_ssid = "...";
+const char* primary_password = "lostONlife";
+
+const char* alternative1_ssid = "Tenda Wi-Fi";
+const char* alternative1_password = "terasa2022";
+
+const char* alternative2_ssid = "pandas";
+const char* alternative2_password = "letsTravel7ar";
+
+// channel ID, read API key for the ThingSpeak channel that handles
+// the min moisture value received from the Android application
+unsigned long ChannelNumber = 2149998;            // Channel ID
+const char * myReadAPIKey = "Q0HFH6975PDN66C3"; // Read API Key
+const int FieldNumber1 = 1;  // The field you wish to read
+
+unsigned long connectionTimeout = 15000; // Timeout duration in milliseconds
+unsigned long connectionStartTime;
+
+
+
+// WiFiClient is a class provided by the ESP8266 WiFi library
+WiFiClient client;  // Declare the client object
 
 
 void setup() {
-  // put your setup code here, to run once:
-  Serial.begin(9600); 
-  WiFi.disconnect();
-  delay(2000);
-  Serial.print("Start connection");
-  WiFi.begin("DIGI-Dp4d","PXGdE4Suqc");
-  // WiFi.begin("pandas","letsTravel7ar");
-  while((!(WiFi.status()== WL_CONNECTED))){
-      delay(200);
-      Serial.print("..");
-    }
-  Serial.println("Connected");
+  Serial.begin(9600);  // begin serial communication on a 9600 baud rate, as the Arduino board 
+
+  WiFi.disconnect(true); // disconnect from any network
+  delay(1000);
+
+  //Serial.println("start");
+  // connecting to the internet 
+  tryConnecting();       // connect to one of the networks provided 
+  //Serial.println("end");
+
+  // establish connection with the ThingSpeak server to send and receive data 
+  ThingSpeak.begin(client);
 }
 
-void loop() {
-  // put your main code here, to run repeatedly:
-  if(Serial.available()>0){
-    String data = Serial.readStringUntil('\n');
-    Serial.println(data);
-    int firstComma = data.indexOf(',');
-    int secondComma = data.indexOf(',', firstComma + 1);
-    int thirdComma = data.indexOf(',', secondComma + 1);
-    int fourthComma = data.indexOf(',', thirdComma + 1);
 
+// function that is used for trying to connect to one of the 3 networks provided
+void tryConnecting() {
+  // is the board connected to the network?
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.println("Already connected to the primary network!");
+  } else { // if not, try connecting to the first network provided 
+    Serial.print("Connecting to the primary network...");
+    connectToNetwork(primary_ssid, primary_password);
 
-    // or write a code_number for each sensor info, so you can diff them 
-    if(firstComma != -1 && secondComma != -1 && thirdComma!= -1 && fourthComma != -1){
-      float t = data.substring(0, firstComma).toFloat();
-      float h = data.substring(firstComma+1, secondComma).toFloat();
-      float l = data.substring(secondComma+1, thirdComma).toFloat();
-      float m = data.substring(thirdComma+1, fourthComma).toFloat();
-      float w = data.substring(fourthComma+1).toFloat();
+    // did it connect?
+    if (WiFi.status() == WL_CONNECTED) {
+      Serial.println("Connected to the primary network!");
+    } else { // f not, try the first alternative
+      Serial.println("Failed to connect to the primary network.");
 
-      Serial.print(t);
-      Serial.print(h);
-      Serial.print(l);
-      Serial.print(m);
-      Serial.println(w);
-      Serial.println();
-      sendData(t,h,l,m,w);
+      Serial.print("Connecting to the first alternative network...");
+      connectToNetwork(alternative1_ssid, alternative1_password);
+
+      if (WiFi.status() == WL_CONNECTED) {
+        Serial.println("Connected to the first alternative network!");
+      } else {
+        Serial.println("Failed to connect to the first alternative network.");
+
+        Serial.print("Connecting to the second alternative network...");
+        connectToNetwork(alternative2_ssid, alternative2_password);
+
+        if (WiFi.status() == WL_CONNECTED) {
+          Serial.println("Connected to the second alternative network!");
+        } else {
+          Serial.println("Failed to connect to the second alternative network.");
+          Serial.println("Unable to establish a connection.");
+        }
+      }
     }
   }
 }
 
-void sendData(float t, float h, float l, float m, float w){
-  WiFiClient client;
-  HTTPClient http;
 
-  String newUrl=URL+String(t)+"&field2="+String(h)+"&field3="+String(l)+"&field4="+String(m)+"&field5="+String(w);
-  http.begin(client,newUrl);
-  int responsecode=http.GET();
-  String data=http.getString();
-  Serial.println(data);
-  http.end();
+void connectToNetwork(const char* ssid, const char* password) {
+  WiFi.begin(ssid, password);
+  connectionStartTime = millis();
+
+  // while the board is still trying to connect
+  while (WiFi.status() != WL_CONNECTED) {
+    // check if enough time passed since searching for this specific connection
+    if (millis() - connectionStartTime >= connectionTimeout) {
+      break; // Break the loop if timeout exceeded
+    }
+    delay(1000);
+  }
 }
 
-// try using the ThingspeakWrite function tho...
+
+void loop() {
+    if (Serial.available()) {
+    String data = Serial.readStringUntil('\n');
+
+    // Extract sensor code and data
+    int sensorCode = data.substring(0, data.indexOf(',')).toInt();
+    float value = data.substring(data.indexOf(',') + 1).toFloat();
 
 
+      // Save data in specific fields based on sensor code
+      if (sensorCode == MOISTURE_CODE) {
+        sendDataToThingSpeak(moisture_field, value);
+      } else if (sensorCode == WATERLEVEL_CODE) {
+        sendDataToThingSpeak(water_level_field, value);
+      } else if (sensorCode == LUMINOSITY_CODE) {
+        sendDataToThingSpeak(lumi_field, value);
+      } else if (sensorCode == HUMIDITY_CODE) {
+        sendDataToThingSpeak(humid_field, value);
+      } else if (sensorCode == TEMPERATURE_CODE) {
+        sendDataToThingSpeak(temp_field, value);
+      }
+     ThingSpeak.writeFields(channelID, writeAPIKey);
+    }
+
+  // read data from ThingSpeak with the channel 'ChannelNumber', with the API key 'myReadAPIKey', from the field 'FieldNumber1'
+  long temp = ThingSpeak.readLongField(ChannelNumber, FieldNumber1, myReadAPIKey);
+  int statusCode = ThingSpeak.getLastReadStatus();
+  // was the read successful?
+  if (statusCode == 200){
+    // send value to the Arduino board 
+    Serial.println(temp);
+  }
+  else{
+    Serial.println("Unable to read channel / No internet connection");
+  }
+  delay(25000);
+
+  
+}
+
+void sendDataToThingSpeak(int fieldNumber, float sensorValue){
+  ThingSpeak.setField(fieldNumber, sensorValue);    
+  ThingSpeak.writeFields(channelID, writeAPIKey);
+  // Write the data to ThingSpeak
+  // ThingSpeak.writeFields(channelID, writeAPIKey);
+  Serial.println(fieldNumber);
+  Serial.println(sensorValue);
+}
 
